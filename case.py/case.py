@@ -90,7 +90,7 @@ def impute_missing_value_with_knn(data, previous_data):
     df = pd.DataFrame(previous_data)
 
     # Yeni veriyi ekle
-    df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)
+    df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)   
 
     # KNN ile eksik verileri doldur
     df_filled = impute_missing_values_knn(df)
@@ -196,7 +196,7 @@ def write_to_influxdb(data):
 
     write_api.write(bucket=bucket, org=org, record=point)
     print("Data written to InfluxDB")
-
+    
 # Veritabanından verileri çekip CSV'ye yazma fonksiyonu
 def query_and_save_to_csv():
     query_api = client.query_api()
@@ -223,24 +223,28 @@ def query_and_save_to_csv():
     # DataFrame'in sütunlarını doğru şekilde düzenleyin
     df = df[["_time", "location", "temperature", "feels_like", "humidity", "wind_speed", "wind_direction"]]
 
+    # Zaman damgasını UTC'den Europe/Istanbul'a dönüştür
+    df['_time'] = pd.to_datetime(df['_time']).dt.tz_convert('Europe/Istanbul')
+
     # CSV dosyasına yaz
     df.to_csv(r'C:\Users\sumey\Masaüstü\case_study\weather_data.csv', index=False)
     print("Veriler CSV dosyasına kaydedildi.")
 
-# Get latitude and longitude from the user
+# Kullanıcıdan enlem ve boylam bilgilerini al
 lat = input("Please enter latitude: ")
 lon = input("Please enter longitude: ")
 
-# Previous values listesi
+# Önceki değerler listesi
 previous_values = []
 
-# Fetch and process data every 5 minutes
+# Her 5 dakikada bir veri çek ve işle
 while True:
     data = fetch_weather_data(lat, lon, api_key)
     validate_and_process_data(data, previous_values)
     write_to_influxdb(data)  # InfluxDB'ye veri yazma
     query_and_save_to_csv()  # Veritabanındaki verileri CSV'ye kaydet
     time.sleep(300)  # 300 saniye (5 dakika) bekle
+
 
 
     #39.924997660618786, 32.837078596522346
