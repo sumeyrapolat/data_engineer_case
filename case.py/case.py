@@ -13,6 +13,10 @@ import time
 from influxdb_client import InfluxDBClient, Point, WritePrecision
 import pytz
 import pandas as pd
+from sklearn.impute import KNNImputer
+
+# KNN Imputer'ı tanımla
+imputer = KNNImputer(n_neighbors=5)
 
 api_key = "8c34616e78bcffbe4ce33f1bee817b61"
 # InfluxDB bağlantısı için ayarlar
@@ -75,10 +79,47 @@ def detect_outliers_iqr(data, key):
     if outliers.size > 0:
         print(f"Outliers detected in {key} (IQR): {outliers}")
 
-def validate_and_process_data(data):
+def impute_missing_values_knn(df):
+    # KNN ile eksik verileri doldurma
+    df_imputed = imputer.fit_transform(df)
+    return pd.DataFrame(df_imputed, columns=df.columns)
+
+# Eksik veriyi doldurmak için kullanılacak fonksiyon
+def impute_missing_value_with_knn(data, previous_data):
+    # Verileri pandas DataFrame'e dönüştür
+    df = pd.DataFrame(previous_data)
+
+    # Yeni veriyi ekle
+    df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)
+
+    # KNN ile eksik verileri doldur
+    df_filled = impute_missing_values_knn(df)
+    
+    # Son doldurulmuş veri
+    return df_filled.iloc[-1].to_dict()
+
+def validate_and_process_data(data, previous_values=[]):
     try:
         if 'main' not in data or 'wind' not in data:
             raise ValueError("Missing expected data in API response")
+        
+        # Verileri eksik veri kontrolü ve KNN ile tamamlama
+        data_to_impute = {
+            'temp': data['main'].get('temp', np.nan),
+            'humidity': data['main'].get('humidity', np.nan),
+            'wind_speed': data['wind'].get('speed', np.nan),
+            'wind_deg': data['wind'].get('deg', np.nan)
+        }
+
+        # Eksik verileri KNN ile doldur
+        filled_data = impute_missing_value_with_knn(data_to_impute, previous_values)
+        data['main']['temp'] = filled_data['temp']
+        data['main']['humidity'] = int(filled_data['humidity'])  # Humidity'yi integer olarak kaydediyoruz
+        data['wind']['speed'] = filled_data['wind_speed']
+        data['wind']['deg'] = filled_data['wind_deg']
+
+        # Veriyi önceki değerlere ekle
+        previous_values.append(filled_data)
 
         weather_data = WeatherData(
             name=data.get('name', 'Unknown location'),
@@ -86,29 +127,29 @@ def validate_and_process_data(data):
             wind=data['wind']
         )
         
-        # Convert temperature to Celsius
+        # Sıcaklığı Celsius'a çevir
         temp_c = kelvin_to_celsius(weather_data.main.temp)
         
-        # Convert wind speed to km/h for processing
+        # Rüzgar hızını km/sa cinsine çevir
         wind_speed_kmh = float(weather_data.wind.speed) * 3.6
         
-        # Aggregate wind data into a more user-friendly format
+        # Rüzgar verilerini daha kullanıcı dostu bir formata dönüştür
         wind_data = f"{wind_speed_kmh:.1f} km/h {wind_direction_to_text(weather_data.wind.deg)} direction"
         
-        # Calculate "feels like" temperature
+        # "Hissedilen" sıcaklığı hesapla
         feels_like_temp = calculate_feels_like(temp_c, float(weather_data.main.humidity), wind_speed_kmh)
         
-        # Detect and report outliers using Z-Score
+        # Aykırı değer tespiti (Z-Score)
         detect_outliers_zscore([{'temp_c': temp_c}], 'temp_c')
         detect_outliers_zscore([{'humidity': float(weather_data.main.humidity)}], 'humidity')
         detect_outliers_zscore([{'wind_speed': wind_speed_kmh}], 'wind_speed')
         
-        # Detect and report outliers using IQR
+        # Aykırı değer tespiti (IQR)
         detect_outliers_iqr([{'temp_c': temp_c}], 'temp_c')
         detect_outliers_iqr([{'humidity': float(weather_data.main.humidity)}], 'humidity')
         detect_outliers_iqr([{'wind_speed': wind_speed_kmh}], 'wind_speed')
         
-        # Print the results
+        # Sonuçları yazdır
         print(f"Timestamp: {data['timestamp']}")
         print(f"Location: {weather_data.name}")
         print(f"Temperature: {temp_c:.2f}°C")
@@ -148,9 +189,9 @@ def write_to_influxdb(data):
         .tag("location", data['name']) \
         .field("temperature", kelvin_to_celsius(data['main']['temp'])) \
         .field("feels_like", kelvin_to_celsius(data['main']['feels_like'])) \
-        .field("humidity", data['main']['humidity']) \
+        .field("humidity", int(data['main']['humidity'])) \
         .field("wind_speed", data['wind']['speed'] * 3.6) \
-        .field("wind_direction", data['wind']['deg']) \
+        .field("wind_direction", int(data['wind']['deg'])) \
         .time(local_time, WritePrecision.NS)
 
     write_api.write(bucket=bucket, org=org, record=point)
@@ -183,20 +224,23 @@ def query_and_save_to_csv():
     df = df[["_time", "location", "temperature", "feels_like", "humidity", "wind_speed", "wind_direction"]]
 
     # CSV dosyasına yaz
-    df.to_csv(r'C:\Users\sumey\Masaüstü\case_study\weather_data.csv'    , index=False)
+    df.to_csv(r'C:\Users\sumey\Masaüstü\case_study\weather_data.csv', index=False)
     print("Veriler CSV dosyasına kaydedildi.")
 
 # Get latitude and longitude from the user
 lat = input("Please enter latitude: ")
 lon = input("Please enter longitude: ")
 
+# Previous values listesi
+previous_values = []
+
 # Fetch and process data every 5 minutes
 while True:
     data = fetch_weather_data(lat, lon, api_key)
-    validate_and_process_data(data)
+    validate_and_process_data(data, previous_values)
     write_to_influxdb(data)  # InfluxDB'ye veri yazma
     query_and_save_to_csv()  # Veritabanındaki verileri CSV'ye kaydet
     time.sleep(300)  # 300 saniye (5 dakika) bekle
 
-    
+
     #39.924997660618786, 32.837078596522346
