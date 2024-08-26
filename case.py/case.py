@@ -15,14 +15,14 @@ import pytz
 import pandas as pd
 from sklearn.impute import KNNImputer
 
-# KNN Imputer'ı tanımla
+# Define KNN Imputer with 5 neighbors
 imputer = KNNImputer(n_neighbors=5)
 
 api_key = "8c34616e78bcffbe4ce33f1bee817b61"
-# InfluxDB bağlantısı için ayarlar
+# InfluxDB connection settings
 token = "akG6YxrQ0Ja2Rgj4LDVl5A_ggiYYe2o3reFpp0-udvS6oKNYzvTnUvfAfDaEbjJIluSWIc2FrIsep0NHGhFM3g=="
 org = "test"
-bucket = "weather_data"  # Daha önce oluşturduğunuz bucket adı
+bucket = "weather_data"  # Name of the bucket previously created
 
 client = InfluxDBClient(url="http://localhost:8086", token=token)
 write_api = client.write_api()
@@ -42,17 +42,19 @@ class WeatherData(BaseModel):
     wind: WeatherWind
 
 def fetch_weather_data(lat, lon, api_key):
+    # Fetch real-time weather data from OpenWeatherMap API
     url = f'https://api.openweathermap.org/data/2.5/weather?lat={lat}&lon={lon}&appid={api_key}'
     response = requests.get(url)
     data = response.json()
     
-    # Add timestamp
+    # Add a timestamp to the data
     data['timestamp'] = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S")
     
     print("API Response:", data)
     return data
 
 def detect_outliers_zscore(data, key):
+    # Detect outliers using Z-Score method
     values = np.array([item[key] for item in data])
     mean = np.mean(values)
     std_dev = np.std(values)
@@ -68,6 +70,7 @@ def detect_outliers_zscore(data, key):
         print(f"Outliers detected in {key} (Z-Score): {values[outliers]}")
 
 def detect_outliers_iqr(data, key):
+    # Detect outliers using Interquartile Range (IQR) method
     values = np.array([item[key] for item in data])
     q1 = np.percentile(values, 25)
     q3 = np.percentile(values, 75)
@@ -80,22 +83,22 @@ def detect_outliers_iqr(data, key):
         print(f"Outliers detected in {key} (IQR): {outliers}")
 
 def impute_missing_values_knn(df):
-    # KNN ile eksik verileri doldurma
+    # Fill missing values using KNN Imputer
     df_imputed = imputer.fit_transform(df)
     return pd.DataFrame(df_imputed, columns=df.columns)
 
-# Eksik veriyi doldurmak için kullanılacak fonksiyon
+# Function to fill missing values using KNN
 def impute_missing_value_with_knn(data, previous_data):
-    # Verileri pandas DataFrame'e dönüştür
+    # Convert data to pandas DataFrame
     df = pd.DataFrame(previous_data)
 
-    # Yeni veriyi ekle
+    # Add new data
     df = pd.concat([df, pd.DataFrame([data])], ignore_index=True)   
 
-    # KNN ile eksik verileri doldur
+    # Fill missing values with KNN
     df_filled = impute_missing_values_knn(df)
     
-    # Son doldurulmuş veri
+    # Return the last filled data
     return df_filled.iloc[-1].to_dict()
 
 def validate_and_process_data(data, previous_values=[]):
@@ -103,7 +106,7 @@ def validate_and_process_data(data, previous_values=[]):
         if 'main' not in data or 'wind' not in data:
             raise ValueError("Missing expected data in API response")
         
-        # Verileri eksik veri kontrolü ve KNN ile tamamlama
+        # Check and fill missing data with KNN
         data_to_impute = {
             'temp': data['main'].get('temp', np.nan),
             'humidity': data['main'].get('humidity', np.nan),
@@ -111,14 +114,14 @@ def validate_and_process_data(data, previous_values=[]):
             'wind_deg': data['wind'].get('deg', np.nan)
         }
 
-        # Eksik verileri KNN ile doldur
+        # Fill missing data using KNN
         filled_data = impute_missing_value_with_knn(data_to_impute, previous_values)
         data['main']['temp'] = filled_data['temp']
-        data['main']['humidity'] = int(filled_data['humidity'])  # Humidity'yi integer olarak kaydediyoruz
+        data['main']['humidity'] = int(filled_data['humidity'])  # Store humidity as integer
         data['wind']['speed'] = filled_data['wind_speed']
         data['wind']['deg'] = filled_data['wind_deg']
 
-        # Veriyi önceki değerlere ekle
+        # Add filled data to previous values
         previous_values.append(filled_data)
 
         weather_data = WeatherData(
@@ -127,29 +130,29 @@ def validate_and_process_data(data, previous_values=[]):
             wind=data['wind']
         )
         
-        # Sıcaklığı Celsius'a çevir
+        # Convert temperature to Celsius
         temp_c = kelvin_to_celsius(weather_data.main.temp)
         
-        # Rüzgar hızını km/sa cinsine çevir
+        # Convert wind speed to km/h
         wind_speed_kmh = float(weather_data.wind.speed) * 3.6
         
-        # Rüzgar verilerini daha kullanıcı dostu bir formata dönüştür
+        # Convert wind data to a more user-friendly format
         wind_data = f"{wind_speed_kmh:.1f} km/h {wind_direction_to_text(weather_data.wind.deg)} direction"
         
-        # "Hissedilen" sıcaklığı hesapla
+        # Calculate "Feels Like" temperature
         feels_like_temp = calculate_feels_like(temp_c, float(weather_data.main.humidity), wind_speed_kmh)
         
-        # Aykırı değer tespiti (Z-Score)
+        # Detect outliers using Z-Score
         detect_outliers_zscore([{'temp_c': temp_c}], 'temp_c')
         detect_outliers_zscore([{'humidity': float(weather_data.main.humidity)}], 'humidity')
         detect_outliers_zscore([{'wind_speed': wind_speed_kmh}], 'wind_speed')
         
-        # Aykırı değer tespiti (IQR)
+        # Detect outliers using IQR
         detect_outliers_iqr([{'temp_c': temp_c}], 'temp_c')
         detect_outliers_iqr([{'humidity': float(weather_data.main.humidity)}], 'humidity')
         detect_outliers_iqr([{'wind_speed': wind_speed_kmh}], 'wind_speed')
         
-        # Sonuçları yazdır
+        # Print the results
         print(f"Timestamp: {data['timestamp']}")
         print(f"Location: {weather_data.name}")
         print(f"Temperature: {temp_c:.2f}°C")
@@ -165,9 +168,11 @@ def validate_and_process_data(data, previous_values=[]):
         print(f"Missing key in API response: {e}")
 
 def kelvin_to_celsius(temp_k):
+    # Convert Kelvin to Celsius
     return float(temp_k) - 273.15
 
 def wind_direction_to_text(deg):
+    # Convert wind direction degree to text
     if (deg >= 0 and deg < 45) or (deg >= 315 and deg <= 360):
         return "north"
     elif deg >= 45 and deg < 135:
@@ -180,9 +185,11 @@ def wind_direction_to_text(deg):
         return "unknown direction"
 
 def calculate_feels_like(temp_c, humidity, wind_speed):
+    # Calculate "Feels Like" temperature
     return temp_c - ((100 - humidity) / 10) + (wind_speed / 10)
 
 def write_to_influxdb(data):
+    # Write data to InfluxDB
     local_time = datetime.utcnow().replace(tzinfo=pytz.utc).astimezone(pytz.timezone('Europe/Istanbul'))
     
     point = Point("weather_data") \
@@ -197,11 +204,11 @@ def write_to_influxdb(data):
     write_api.write(bucket=bucket, org=org, record=point)
     print("Data written to InfluxDB")
     
-# Veritabanından verileri çekip CSV'ye yazma fonksiyonu
+# Function to query data from the database and save to a CSV file
 def query_and_save_to_csv():
     query_api = client.query_api()
 
-    # Sorguyu oluştur
+    # Create the query
     query = '''
     from(bucket: "weather_data")
     |> range(start: 0)
@@ -209,10 +216,10 @@ def query_and_save_to_csv():
     |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
     '''
 
-    # Verileri çek
+    # Fetch the data
     tables = query_api.query(query, org=org)
 
-    # Sonuçları pandas DataFrame'e çevir
+    # Convert results to pandas DataFrame
     records = []
     for table in tables:
         for record in table.records:
@@ -220,40 +227,36 @@ def query_and_save_to_csv():
     
     df = pd.DataFrame.from_records(records)
 
-    # DataFrame'in sütunlarını doğru şekilde düzenleyin
+    # Reorder columns for the DataFrame
     df = df[["_time", "location", "temperature", "feels_like", "humidity", "wind_speed", "wind_direction"]]
 
-    # Zaman damgasını UTC'den Europe/Istanbul'a dönüştür
+    # Convert timestamp from UTC to Europe/Istanbul timezone
     df['_time'] = pd.to_datetime(df['_time']).dt.tz_convert('Europe/Istanbul')
 
-    # Zaman damgasını en yakın 5 dakikaya yuvarla
+    # Round the timestamp to the nearest 5 minutes
     df['_time'] = df['_time'].dt.round('5min')
     
-    # Sadece saat başından itibaren her 5 dakikada bir olan verileri seç
+    # Select data that occurs every 5 minutes from the start of the hour
     df = df[df['_time'].dt.minute % 5 == 0]
 
-
-    # CSV dosyasına yaz
+    # Save to CSV file
     df.to_csv(r'C:\Users\sumey\Masaüstü\case_study\weather_data.csv', index=False)
-    print("Veriler CSV dosyasına kaydedildi.")
-
+    print("Data saved to CSV file.")
 
     
-# Kullanıcıdan enlem ve boylam bilgilerini al
+# Prompt the user to enter latitude and longitude
 lat = input("Please enter latitude: ")
 lon = input("Please enter longitude: ")
 
-# Önceki değerler listesi
+# List to store previous values
 previous_values = []
 
-# Her 5 dakikada bir veri çek ve işle
+# Fetch and process data every 5 minutes
 while True:
     data = fetch_weather_data(lat, lon, api_key)
     validate_and_process_data(data, previous_values)
-    write_to_influxdb(data)  # InfluxDB'ye veri yazma
-    query_and_save_to_csv()  # Veritabanındaki verileri CSV'ye kaydet
-    time.sleep(60)  # 300 saniye (5 dakika) bekle
+    write_to_influxdb(data)  # Write data to InfluxDB
+    query_and_save_to_csv()  # Save data from the database to CSV
+    time.sleep(300)  # Wait for 300 seconds (5 minutes) before fetching the next data
 
-
-
-    #39.924997660618786, 32.837078596522346
+# Example input: Latitude: 39.924997660618786, Longitude: 32.837078596522346
