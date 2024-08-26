@@ -204,7 +204,7 @@ def query_and_save_to_csv():
     # Sorguyu oluştur
     query = '''
     from(bucket: "weather_data")
-    |> range(start: -1d)  // Son 1 günün verilerini çekmek için
+    |> range(start: 0)
     |> filter(fn: (r) => r["_measurement"] == "weather_data")
     |> pivot(rowKey:["_time"], columnKey: ["_field"], valueColumn: "_value")
     '''
@@ -226,10 +226,19 @@ def query_and_save_to_csv():
     # Zaman damgasını UTC'den Europe/Istanbul'a dönüştür
     df['_time'] = pd.to_datetime(df['_time']).dt.tz_convert('Europe/Istanbul')
 
+    # Zaman damgasını en yakın 5 dakikaya yuvarla
+    df['_time'] = df['_time'].dt.round('5min')
+    
+    # Sadece saat başından itibaren her 5 dakikada bir olan verileri seç
+    df = df[df['_time'].dt.minute % 5 == 0]
+
+
     # CSV dosyasına yaz
     df.to_csv(r'C:\Users\sumey\Masaüstü\case_study\weather_data.csv', index=False)
     print("Veriler CSV dosyasına kaydedildi.")
 
+
+    
 # Kullanıcıdan enlem ve boylam bilgilerini al
 lat = input("Please enter latitude: ")
 lon = input("Please enter longitude: ")
@@ -243,7 +252,7 @@ while True:
     validate_and_process_data(data, previous_values)
     write_to_influxdb(data)  # InfluxDB'ye veri yazma
     query_and_save_to_csv()  # Veritabanındaki verileri CSV'ye kaydet
-    time.sleep(300)  # 300 saniye (5 dakika) bekle
+    time.sleep(60)  # 300 saniye (5 dakika) bekle
 
 
 
