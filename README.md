@@ -89,8 +89,8 @@ This graph shows the Root Mean Squared Error (RMSE) over epochs for both trainin
 ## Results
 The final model was evaluated on the test set, and the results are as follows:
 
-- **R² Score**: 0.9737912283600086
-- **Mean Squared Error**: 0.0003676555419552269
+- **R² Score**: 0.968509949024337
+- **Mean Squared Error**: 0.0009037406585391712
 
 These results indicate that the model has a strong predictive performance.
 
