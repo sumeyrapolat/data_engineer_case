@@ -15,7 +15,7 @@ This project is designed to collect real-time weather data, process it, visualiz
 
 ### InfluxDB UI - Last 2 Days Data
 
-![InfluxDB UI](images/influxDBUI.png)
+![InfluxDB UI](images/influxDBUI.jpg)
 
 ## Data Visualization
 The following graphs are generated based on the collected weather data:
