@@ -13,6 +13,10 @@ This project is designed to collect real-time weather data, process it, visualiz
 - **Data Visualization**: A variety of graphs are generated to visualize the trends and patterns in the weather data over time, including temperature, humidity, wind speed, and more.
 - **Temperature Prediction**: Uses a Bidirectional LSTM model to predict future temperature values based on historical data.
 
+### InfluxDB UI - Last 2 Days Data
+
+![InfluxDB UI](images/influxDBUI.png)
+
 ## Data Visualization
 The following graphs are generated based on the collected weather data:
 
